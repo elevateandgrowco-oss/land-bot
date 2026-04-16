@@ -109,14 +109,24 @@ export async function handleIncomingSMS(fromPhone, body) {
   });
   saveLog(log);
 
-  // Hot lead alert
+  // Hot lead alert — notify owner by SMS
   const hotWords = ["yes", "interested", "offer", "how much", "cash", "when", "sure", "deal", "okay", "accept"];
   if (hotWords.some(w => body.toLowerCase().includes(w))) {
     console.log(`\n🔥 HOT LAND LEAD — ${lead.address}`);
     console.log(`   Our offer: $${lead.analysis?.ourOffer?.toLocaleString()}`);
-    console.log(`   Assign to builder at: $${lead.analysis?.sellPriceToBuilder?.toLocaleString()}`);
+    console.log(`   Assign at: $${lead.analysis?.sellPriceToBuilder?.toLocaleString()}`);
     console.log(`   Your profit: $${lead.analysis?.assignmentFee?.toLocaleString()}`);
     console.log(`   Phone: ${fromPhone}`);
+    // Alert owner
+    try {
+      await client.messages.create({
+        body: `🔥 HOT LEAD (Land)\n${lead.address}\nSeller said: "${body}"\nOffer: $${lead.analysis?.ourOffer?.toLocaleString()}\nYour profit: $${lead.analysis?.assignmentFee?.toLocaleString()}\nCall/text them: ${fromPhone}`,
+        from: FROM,
+        to: "+14017716184",
+      });
+    } catch (e) {
+      console.error("Alert failed:", e.message);
+    }
   }
 }
 
