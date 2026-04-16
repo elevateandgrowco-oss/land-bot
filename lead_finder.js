@@ -1,16 +1,9 @@
 /**
  * lead_finder.js
- * Finds vacant land listings from:
- * 1. Manual CSV import (primary — use county tax records, LandWatch download, etc.)
- * 2. LandWatch.com scraper
- * 3. Zillow lots/land filter
- *
- * FREE LEAD SOURCES:
- *   - County assessor websites: search by property type = "vacant land"
- *   - LandWatch.com: filter by state → download or copy listings
- *   - Zillow: filter homes → Lot/Land → sort by "Days on Market"
- *   - State tax delinquent lists: usually free PDFs on county treasurer sites
- *   Put any CSV with [address, phone, askingPrice, acreage] as: leads_import.csv
+ * Finds vacant land leads from:
+ * 1. Manual CSV import (primary)
+ * 2. Craigslist "land for sale" listings (sellers post their phone in listing)
+ * 3. LandWatch.com (addresses only, no phones)
  */
 
 import puppeteer from "puppeteer-extra";
@@ -19,27 +12,28 @@ import * as cheerio from "cheerio";
 import axios from "axios";
 import fs from "fs";
 import dotenv from "dotenv";
+import { skipTraceLeads } from "./skip_tracer.js";
 dotenv.config();
 
 puppeteer.use(StealthPlugin());
 
-// High-growth markets where builders need lots
+// Craigslist cities for land search
 const MARKETS = [
-  { name: "Austin, TX",       state: "TX", landwatch: "texas/travis-county" },
-  { name: "Nashville, TN",    state: "TN", landwatch: "tennessee/davidson-county" },
-  { name: "Charlotte, NC",    state: "NC", landwatch: "north-carolina/mecklenburg-county" },
-  { name: "Phoenix, AZ",      state: "AZ", landwatch: "arizona/maricopa-county" },
-  { name: "Tampa, FL",        state: "FL", landwatch: "florida/hillsborough-county" },
-  { name: "Atlanta, GA",      state: "GA", landwatch: "georgia/fulton-county" },
-  { name: "Dallas, TX",       state: "TX", landwatch: "texas/dallas-county" },
-  { name: "Denver, CO",       state: "CO", landwatch: "colorado/denver-county" },
-  { name: "Raleigh, NC",      state: "NC", landwatch: "north-carolina/wake-county" },
-  { name: "Jacksonville, FL", state: "FL", landwatch: "florida/duval-county" },
-  { name: "San Antonio, TX",  state: "TX", landwatch: "texas/bexar-county" },
-  { name: "Orlando, FL",      state: "FL", landwatch: "florida/orange-county" },
-  { name: "Houston, TX",      state: "TX", landwatch: "texas/harris-county" },
-  { name: "Columbus, OH",     state: "OH", landwatch: "ohio/franklin-county" },
-  { name: "Indianapolis, IN", state: "IN", landwatch: "indiana/marion-county" },
+  { name: "Austin, TX",        cl: "austin",        landwatch: "texas/travis-county" },
+  { name: "Nashville, TN",     cl: "nashville",     landwatch: "tennessee/davidson-county" },
+  { name: "Charlotte, NC",     cl: "charlotte",     landwatch: "north-carolina/mecklenburg-county" },
+  { name: "Phoenix, AZ",       cl: "phoenix",       landwatch: "arizona/maricopa-county" },
+  { name: "Tampa, FL",         cl: "tampa",         landwatch: "florida/hillsborough-county" },
+  { name: "Atlanta, GA",       cl: "atlanta",       landwatch: "georgia/fulton-county" },
+  { name: "Dallas, TX",        cl: "dallas",        landwatch: "texas/dallas-county" },
+  { name: "Raleigh, NC",       cl: "raleigh",       landwatch: "north-carolina/wake-county" },
+  { name: "Jacksonville, FL",  cl: "jacksonville",  landwatch: "florida/duval-county" },
+  { name: "San Antonio, TX",   cl: "sanantonio",    landwatch: "texas/bexar-county" },
+  { name: "Orlando, FL",       cl: "orlando",       landwatch: "florida/orange-county" },
+  { name: "Houston, TX",       cl: "houston",       landwatch: "texas/harris-county" },
+  { name: "Columbus, OH",      cl: "columbus",      landwatch: "ohio/franklin-county" },
+  { name: "Indianapolis, IN",  cl: "indianapolis",  landwatch: "indiana/marion-county" },
+  { name: "Denver, CO",        cl: "denver",        landwatch: "colorado/denver-county" },
 ];
 
 function parseCSVLine(line) {
@@ -96,215 +90,123 @@ export function loadManualLeads(maxLeads = 50) {
   return leads;
 }
 
-// ── LandWatch.com scraper ─────────────────────────────────────────────────────
-export async function findLandWatchLeads(market, maxLeads = 15) {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+// ── Extract phone number from text ────────────────────────────────────────────
+function extractPhone(text) {
+  const matches = text.match(/(\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})/g);
+  if (!matches) return null;
+  for (const m of matches) {
+    const digits = m.replace(/\D/g, "");
+    if (digits.length === 10 && !digits.startsWith("000")) return digits;
+    if (digits.length === 11 && digits.startsWith("1")) return digits.slice(1);
+  }
+  return null;
+}
 
+// ── Extract acreage from text ─────────────────────────────────────────────────
+function extractAcreage(text) {
+  const match = text.match(/([\d.]+)\s*acres?/i);
+  return match ? parseFloat(match[1]) : null;
+}
+
+// ── Craigslist land scraper ───────────────────────────────────────────────────
+export async function findCraigslistLandLeads(market, maxLeads = 10) {
   const leads = [];
 
   try {
-    const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    );
-    await page.setViewport({ width: 1280, height: 800 });
+    // Search Craigslist real estate for land/lot listings
+    const queries = ["land for sale", "vacant lot", "acres for sale"];
+    const query = queries[Math.floor(Math.random() * queries.length)];
+    const searchUrl = `https://${market.cl}.craigslist.org/search/rea?srchType=T&max_price=150000&query=${encodeURIComponent(query)}&sort=priceasc`;
 
-    // LandWatch sorted by "Recently Reduced" price — best motivated sellers
-    const url = `https://www.landwatch.com/${market.landwatch}/land?sort=3&priceMax=100000&priceMin=5000`;
-    console.log(`  🔍 Scraping LandWatch: ${market.name}`);
+    console.log(`  🔍 Craigslist land: ${market.name} ("${query}")`);
 
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await new Promise(r => setTimeout(r, 4000));
-
-    const html = await page.content();
-    const $ = cheerio.load(html);
-
-    // Extract from JSON-LD schema
-    $("script[type='application/ld+json']").each((_, el) => {
-      try {
-        const data = JSON.parse($(el).html());
-        const items = Array.isArray(data) ? data : [data];
-        items.forEach(item => {
-          if (item["@type"] === "Product" || item.offers) {
-            const price = item.offers?.price || item.price || 0;
-            const name = item.name || "";
-            if (name && parseInt(price) > 0) {
-              leads.push({
-                source: "landwatch",
-                city: market.name,
-                address: name,
-                askingPrice: parseInt(price),
-                acreage: null,
-                url: item.url || null,
-                phone: null,
-                email: null,
-                scrapedAt: new Date().toISOString(),
-              });
-            }
-          }
-        });
-      } catch { /* skip */ }
+    const res = await axios.get(searchUrl, {
+      timeout: 15000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+      },
     });
 
-    // Fallback: parse listing cards
-    if (leads.length === 0) {
-      $("[class*=card], [class*=listing], [class*=result], article").slice(0, maxLeads).each((_, el) => {
-        const title = $(el).find("h2, h3, [class*=title]").first().text().trim();
-        const priceText = $(el).find("[class*=price]").first().text().trim();
-        const price = parseInt(priceText.replace(/[^0-9]/g, "")) || 0;
-        const acreText = $(el).find("[class*=acre], [class*=size]").first().text().trim();
-        const acreMatch = acreText.match(/([\d.]+)\s*acre/i);
+    const $ = cheerio.load(res.data);
+    const listings = [];
 
-        if (title && price > 0) {
+    $("li.cl-search-result, .result-row, li[class*=result]").each((_, el) => {
+      const link = $(el).find("a[href*='/rea/'], a.posting-title").attr("href");
+      const title = $(el).find(".posting-title, a.posting-title, .result-title").text().trim();
+      const priceText = $(el).find(".priceinfo, .result-price").text().trim();
+      const price = parseInt(priceText.replace(/[^0-9]/g, "")) || 0;
+
+      if (link && title) {
+        const fullUrl = link.startsWith("http") ? link : `https://${market.cl}.craigslist.org${link}`;
+        // Filter for land-related titles
+        const isLand = /\b(land|lot|acre|parcel|vacant|plot|farm|ranch)\b/i.test(title);
+        if (isLand) listings.push({ url: fullUrl, title, price });
+      }
+    });
+
+    // Newer Craigslist markup fallback
+    if (listings.length === 0) {
+      $("a.posting-title, .cl-app-anchor").each((_, el) => {
+        const link = $(el).attr("href");
+        const title = $(el).text().trim();
+        if (link && title) {
+          const isLand = /\b(land|lot|acre|parcel|vacant|plot|farm|ranch)\b/i.test(title);
+          if (isLand) {
+            const fullUrl = link.startsWith("http") ? link : `https://${market.cl}.craigslist.org${link}`;
+            listings.push({ url: fullUrl, title, price: 0 });
+          }
+        }
+      });
+    }
+
+    console.log(`    Found ${listings.length} land listings, extracting contact info...`);
+
+    for (const listing of listings.slice(0, maxLeads * 2)) {
+      if (leads.length >= maxLeads) break;
+
+      try {
+        const detailRes = await axios.get(listing.url, {
+          timeout: 10000,
+          headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" },
+        });
+
+        const $d = cheerio.load(detailRes.data);
+        const bodyText = $d("#postingbody, .posting-body, body").text();
+        const phone = extractPhone(bodyText);
+
+        let price = listing.price;
+        if (!price) {
+          const priceMatch = $d(".price, [class*=price]").first().text();
+          price = parseInt(priceMatch.replace(/[^0-9]/g, "")) || 0;
+        }
+
+        const acreage = extractAcreage(bodyText) || extractAcreage(listing.title);
+        const mapAddress = $d(".mapaddress, [class*=mapaddress]").text().trim();
+        const address = mapAddress || listing.title;
+
+        if (phone) {
           leads.push({
-            source: "landwatch",
+            source: "craigslist",
             city: market.name,
-            address: title,
+            address,
             askingPrice: price,
-            acreage: acreMatch ? parseFloat(acreMatch[1]) : null,
-            url: $(el).find("a").first().attr("href") || null,
-            phone: null,
+            acreage,
+            phone,
+            url: listing.url,
             email: null,
             scrapedAt: new Date().toISOString(),
           });
-        }
-      });
-    }
-
-    // Get contact info from individual listings
-    for (const lead of leads.slice(0, 5)) {
-      if (!lead.url) continue;
-      try {
-        const detailUrl = lead.url.startsWith("http") ? lead.url : `https://www.landwatch.com${lead.url}`;
-        await page.goto(detailUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
-        await new Promise(r => setTimeout(r, 1500));
-
-        const detailHtml = await page.content();
-        const $d = cheerio.load(detailHtml);
-        const bodyText = $d("body").text();
-
-        // Extract phone
-        const phoneMatch = bodyText.match(/\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
-        if (phoneMatch) lead.phone = phoneMatch[0].replace(/[^0-9]/g, "");
-
-        // Extract acreage if not found
-        if (!lead.acreage) {
-          const acreMatch = bodyText.match(/([\d.]+)\s*acres?/i);
-          if (acreMatch) lead.acreage = parseFloat(acreMatch[1]);
+          console.log(`    ✓ Found: ${address} | ${acreage ? acreage + ' acres' : 'unknown acres'} | $${price.toLocaleString()} | ${phone}`);
         }
 
-        // Extract description
-        lead.description = $d("[class*=description], [class*=details]").first().text()
-          .replace(/\s+/g, " ").trim().slice(0, 300);
+        await new Promise(r => setTimeout(r, 800));
 
       } catch { /* skip */ }
-      await new Promise(r => setTimeout(r, 800));
     }
 
   } catch (err) {
-    console.log(`    ⚠️  LandWatch ${market.name}: ${err.message.slice(0, 80)}`);
-  } finally {
-    await browser.close();
-  }
-
-  return leads.slice(0, maxLeads);
-}
-
-// ── Zillow Lots/Land scraper ──────────────────────────────────────────────────
-export async function findZillowLandLeads(market, maxLeads = 15) {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-
-  const leads = [];
-
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    );
-    await page.setViewport({ width: 1280, height: 800 });
-
-    // Zillow lots/land filter, sorted by days on market (most motivated sellers first)
-    const citySlug = market.name.toLowerCase().replace(/,\s*/g, "-").replace(/\s+/g, "-");
-    const url = `https://www.zillow.com/${citySlug}/lots--land/?sort=days&price=0-150000`;
-    console.log(`  🔍 Scraping Zillow lots: ${market.name}`);
-
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await new Promise(r => setTimeout(r, 4000));
-
-    const html = await page.content();
-    const $ = cheerio.load(html);
-
-    // Try __NEXT_DATA__ embedded JSON
-    const nextDataEl = $("#__NEXT_DATA__").text();
-    if (nextDataEl) {
-      try {
-        const nextData = JSON.parse(nextDataEl);
-        const results =
-          nextData?.props?.pageProps?.searchPageState?.cat1?.searchResults?.listResults || [];
-        results.slice(0, maxLeads).forEach(item => {
-          const address = item.addressStreet || "";
-          const city = item.addressCity || "";
-          const state = item.addressState || "";
-          const zip = item.addressZipcode || "";
-          const price = item.unformattedPrice || 0;
-          const zpid = item.zpid;
-          const lotSize = item.lotAreaValue || null;
-
-          if (address && price > 0) {
-            leads.push({
-              source: "zillow",
-              city: market.name,
-              address: `${address}, ${city}, ${state} ${zip}`.trim(),
-              askingPrice: price,
-              acreage: lotSize ? parseFloat(lotSize) / 43560 : null, // sq ft → acres
-              url: zpid ? `https://www.zillow.com/homedetails/${zpid}_zpid/` : null,
-              phone: null,
-              email: null,
-              scrapedAt: new Date().toISOString(),
-            });
-          }
-        });
-      } catch { /* JSON parse failed */ }
-    }
-
-    // Fallback: schema.org JSON-LD
-    if (leads.length === 0) {
-      $("script[type='application/ld+json']").each((_, el) => {
-        try {
-          const data = JSON.parse($(el).html());
-          const items = Array.isArray(data) ? data : [data];
-          items.forEach(item => {
-            if (item.url?.includes("/homedetails/") && item.name) {
-              const price = item.offers?.price || 0;
-              if (parseInt(price) > 0) {
-                leads.push({
-                  source: "zillow",
-                  city: market.name,
-                  address: item.name,
-                  askingPrice: parseInt(price),
-                  acreage: null,
-                  url: item.url,
-                  phone: null,
-                  email: null,
-                  scrapedAt: new Date().toISOString(),
-                });
-              }
-            }
-          });
-        } catch { /* skip */ }
-      });
-    }
-
-  } catch (err) {
-    console.log(`    ⚠️  Zillow ${market.name}: ${err.message.slice(0, 80)}`);
-  } finally {
-    await browser.close();
+    console.log(`    ⚠️  Craigslist ${market.name}: ${err.message.slice(0, 80)}`);
   }
 
   return leads.slice(0, maxLeads);
@@ -312,18 +214,18 @@ export async function findZillowLandLeads(market, maxLeads = 15) {
 
 // ── Main entry point ──────────────────────────────────────────────────────────
 export async function findLeads(maxTotal = 20) {
-  // 1. Check for manual CSV import first (fastest, best data)
+  // 1. Check for manual CSV import first
   const manualLeads = loadManualLeads(maxTotal);
   if (manualLeads.length > 0) {
     console.log(`\n🌿 Using ${manualLeads.length} leads from CSV import`);
     return manualLeads.slice(0, maxTotal);
   }
 
-  // 2. Scrape LandWatch across 2 random markets
+  // 2. Scrape Craigslist land listings across random markets
   const shuffled = [...MARKETS].sort(() => Math.random() - 0.5);
-  const marketsToTry = shuffled.slice(0, 2);
+  const marketsToTry = shuffled.slice(0, 4);
 
-  console.log(`\n🌿 Finding vacant land deals...`);
+  console.log(`\n🌿 Finding vacant land leads on Craigslist...`);
   console.log(`   Markets: ${marketsToTry.map(m => m.name).join(", ")}`);
 
   const allLeads = [];
@@ -331,29 +233,22 @@ export async function findLeads(maxTotal = 20) {
   for (const market of marketsToTry) {
     if (allLeads.length >= maxTotal) break;
     const perMarket = Math.ceil((maxTotal - allLeads.length) / marketsToTry.length);
-
-    // Try LandWatch first
-    let leads = await findLandWatchLeads(market, perMarket);
-
-    // Fallback to Zillow if LandWatch finds nothing
-    if (leads.length === 0) {
-      leads = await findZillowLandLeads(market, perMarket);
-    }
-
+    const leads = await findCraigslistLandLeads(market, perMarket);
     allLeads.push(...leads);
-    console.log(`  Found ${leads.length} leads in ${market.name} (total: ${allLeads.length})`);
-    await new Promise(r => setTimeout(r, 1500));
+    console.log(`  Found ${leads.length} leads with phones in ${market.name} (total: ${allLeads.length})`);
+    await new Promise(r => setTimeout(r, 2000));
   }
 
-  if (allLeads.length === 0) {
+  // 3. Skip trace any leads missing phone numbers
+  const leadsWithPhones = await skipTraceLeads(allLeads);
+
+  if (leadsWithPhones.length === 0) {
     console.log(`
-  ⚠️  No leads scraped. Best free sources for land leads:
-     1. County assessor/treasurer sites → search "vacant land" → export CSV
-     2. landwatch.com → filter your county → manually copy listings
-     3. Zillow → Lots/Land filter → Days on Market → save as leads_import.csv
-     Required CSV columns: address, phone, askingPrice, acreage (optional)
+  ⚠️  No land leads with phone numbers found.
+     Add BATCH_SKIP_TRACING_API_KEY to your .env file to enable automatic phone lookup.
+     Sign up at batchskiptracing.com (~$0.18/record)
 `);
   }
 
-  return allLeads.slice(0, maxTotal);
+  return leadsWithPhones.slice(0, maxTotal);
 }
