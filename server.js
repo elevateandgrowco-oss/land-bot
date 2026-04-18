@@ -93,8 +93,8 @@ async function runOutreach() {
         continue;
       }
 
-      if (analysis.dealScore === "pass" || analysis.ourOffer <= 0) {
-        addLead(log, { ...lead, analysis, skipReason: "numbers dont work" });
+      if (!analysis.ourOffer || analysis.ourOffer <= 0) {
+        addLead(log, { ...lead, analysis, skipReason: "no offer calculated" });
         saveLog(log);
         continue;
       }
