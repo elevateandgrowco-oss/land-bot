@@ -9,14 +9,21 @@
  * 3. NAHB (National Association of Home Builders) directory
  */
 
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import * as cheerio from "cheerio";
 import fs from "fs";
 import dotenv from "dotenv";
 dotenv.config();
 
-puppeteer.use(StealthPlugin());
+let puppeteerReady = false;
+let puppeteer;
+async function initPuppeteer() {
+  if (puppeteerReady) return;
+  const { default: pExtra } = await import("puppeteer-extra");
+  const { default: StealthPlugin } = await import("puppeteer-extra-plugin-stealth");
+  pExtra.use(StealthPlugin());
+  puppeteer = pExtra;
+  puppeteerReady = true;
+}
 
 const BUILDER_DB = "builders.json";
 
@@ -32,6 +39,7 @@ function saveBuilders(db) {
 
 // ── Find builders from Craigslist ─────────────────────────────────────────────
 export async function findCraigslistBuilders(city) {
+  await initPuppeteer();
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
