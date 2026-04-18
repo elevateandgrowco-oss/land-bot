@@ -136,12 +136,12 @@ async function runOutreach() {
 }
 
 // ── Cron: 9am and 5pm Mon-Fri EDT ────────────────────────────────────────────
-cron.schedule("0 9 * * 1-5", () => {
+cron.schedule("0 9 * * *", () => {
   console.log("\n⏰ Cron fired: 9am EDT run");
   runOutreach().catch(err => console.error("Outreach error:", err.message));
 }, { timezone: "America/New_York" });
 
-cron.schedule("0 17 * * 1-5", () => {
+cron.schedule("0 17 * * *", () => {
   console.log("\n⏰ Cron fired: 5pm EDT run");
   runOutreach().catch(err => console.error("Outreach error:", err.message));
 }, { timezone: "America/New_York" });
