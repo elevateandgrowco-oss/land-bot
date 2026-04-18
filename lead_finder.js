@@ -20,6 +20,7 @@ import axios from "axios";
 import fs from "fs";
 import dotenv from "dotenv";
 import { skipTraceLeads } from "./skip_tracer.js";
+import { findCountyRecordLeads } from "./county_records.js";
 dotenv.config();
 
 puppeteer.use(StealthPlugin());
@@ -464,6 +465,17 @@ export async function findLeads(maxTotal = 30) {
     // Step 3: BatchData — long-time absentee owners in this market
     const longTimeLeads = await findLongTimeOwners(market, 15);
     allLeads.push(...longTimeLeads);
+
+    // Step 4: County public records — vacant land + 10yr+ absentee owners (free PropStream)
+    try {
+      const countyLeads = await findCountyRecordLeads([market], 40);
+      if (countyLeads.length > 0) {
+        console.log(`  🏛️  County records (${market.name}): ${countyLeads.length} long-time owners`);
+        allLeads.push(...countyLeads);
+      }
+    } catch (err) {
+      console.log(`  ⚠️  County records (${market.name}): ${err.message?.slice(0, 60)}`);
+    }
   }
 
   console.log(`\n📊 Raw leads collected: ${allLeads.length}`);
