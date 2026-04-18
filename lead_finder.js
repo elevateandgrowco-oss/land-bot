@@ -13,8 +13,6 @@
  * - You assign to the builder next door for $40K = $15K profit
  */
 
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import * as cheerio from "cheerio";
 import axios from "axios";
 import fs from "fs";
@@ -23,7 +21,17 @@ import { skipTraceLeads } from "./skip_tracer.js";
 import { findCountyRecordLeads } from "./county_records.js";
 dotenv.config();
 
-puppeteer.use(StealthPlugin());
+// Lazy-load puppeteer so the HTTP server starts without heavy module init
+let puppeteerReady = false;
+let puppeteer;
+async function initPuppeteer() {
+  if (puppeteerReady) return;
+  const { default: pExtra } = await import("puppeteer-extra");
+  const { default: StealthPlugin } = await import("puppeteer-extra-plugin-stealth");
+  pExtra.use(StealthPlugin());
+  puppeteer = pExtra;
+  puppeteerReady = true;
+}
 
 const BATCH_API_KEY = process.env.BATCH_SKIP_TRACING_API_KEY;
 
@@ -82,6 +90,7 @@ function dedup(leads) {
 // ── 1. Google Maps — find active new construction areas ───────────────────────
 // Searches for major builders in the market, extracts zip codes they're building in
 async function findNewConstructionZips(market) {
+  await initPuppeteer();
   const extraZips = new Set();
   let browser;
   try {
