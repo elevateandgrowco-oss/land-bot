@@ -55,7 +55,7 @@ app.get("/", (req, res) => {
   res.json({ status: "ok", service: "land-bot", time: new Date().toISOString() });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n✅ Land Bot webhook server running on port ${PORT}`);
 });
 
