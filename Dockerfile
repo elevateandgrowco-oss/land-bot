@@ -17,4 +17,4 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
 
-CMD ["node", "webhook.js"]
+CMD ["node", "server.js"]

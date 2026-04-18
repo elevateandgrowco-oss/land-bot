@@ -130,11 +130,46 @@ export async function handleIncomingSMS(fromPhone, body) {
   }
 }
 
+// ── Follow-up message templates ───────────────────────────────────────────────
+function getFollowUpMessage(lead, followUpNum) {
+  const shortAddr = lead.address.split(",")[0];
+  const offer = lead.analysis?.ourOffer ? `$${lead.analysis.ourOffer.toLocaleString()}` : "a fair cash offer";
+  const nearConstruction = lead.nearConstruction;
+
+  const messages = {
+    1: nearConstruction
+      ? `Hey, just wanted to make sure my message didn't get lost. I'm buying lots in your area — there's a lot of new development going up nearby and I'm looking to move fast. Still interested in a cash offer for ${shortAddr}? - Jon`
+      : `Hey, just wanted to make sure my message didn't get lost. I can do ${offer} cash for the lot at ${shortAddr}, close in 2–3 weeks, zero fees on your end. Still want to move forward? - Jon`,
+
+    2: nearConstruction
+      ? `Following up on ${shortAddr}. The area's moving fast — builders are buying up lots nearby and I want to lock something in before prices shift. Cash, fast close, no agents. Worth a quick chat? - Jon`
+      : `Quick follow-up on ${shortAddr}. Cash offer still stands — no agents, no fees, I handle all the paperwork. If the timing isn't right yet, just let me know. - Jon`,
+
+    3: `Hey, last thing I'll say about ${shortAddr} — if price was the only issue, I might have a little room to move. Want me to take another look? Cash, 2–3 week close. - Jon`,
+
+    4: `Hi, circling back one last time on ${shortAddr}. If you ever want to talk numbers, I'm still buying in your area. Just reply anytime. - Jon`,
+  };
+
+  return messages[followUpNum] || messages[4];
+}
+
 // ── Follow-up sequence ────────────────────────────────────────────────────────
 export async function runFollowUps(dryRun = false) {
   const log = loadLog();
   const now = Date.now();
   const DAY = 24 * 60 * 60 * 1000;
+
+  // Follow-up schedule (days since initial SMS):
+  // #1 → Day 1 (next day check-in)
+  // #2 → Day 3 (urgency nudge)
+  // #3 → Day 7 (price flexibility hint)
+  // #4 → Day 21 (final re-engagement)
+  const schedule = [
+    { num: 1, minDays: 1, field: "followUp1SentAt" },
+    { num: 2, minDays: 3, field: "followUp2SentAt" },
+    { num: 3, minDays: 7, field: "followUp3SentAt" },
+    { num: 4, minDays: 21, field: "followUp4SentAt" },
+  ];
 
   for (const lead of log.leads) {
     if (!lead.phone || lead.unsubscribed || lead.status === "closed") continue;
@@ -144,26 +179,22 @@ export async function runFollowUps(dryRun = false) {
     const daysSince = (now - sentAt) / DAY;
     const hasReplied = lead.conversation?.some(m => m.role === "user");
 
-    // Follow-up 1: Day 4
-    if (!lead.followUp1SentAt && daysSince >= 4 && !hasReplied) {
-      const shortAddr = lead.address.split(",")[0];
-      const msg = `Just following up on your land near ${shortAddr}. Still able to make you a cash offer and close in 2-3 weeks. Interested? - Jon`;
-      if (!dryRun) {
-        await sendFollowUpSMS(lead.phone, msg, lead.id, 1);
-      } else {
-        console.log(`[DRY RUN] Follow-up 1 → ${lead.phone}: "${msg}"`);
-      }
-    }
+    // Don't send follow-ups 1-3 if seller has already replied (still send #4 for re-engagement)
+    for (const step of schedule) {
+      if (lead[step.field]) continue; // already sent
+      if (daysSince < step.minDays) continue; // too early
+      if (hasReplied && step.num < 4) continue; // replied — skip routine follow-ups
 
-    // Follow-up 2: Day 10
-    if (!lead.followUp2SentAt && daysSince >= 10 && !hasReplied) {
-      const shortAddr = lead.address.split(",")[0];
-      const msg = `Last follow-up on ${shortAddr} — if the timing isn't right, no worries at all. We buy land regularly in this area. Reach out anytime. - Jon`;
+      const msg = getFollowUpMessage(lead, step.num);
+
       if (!dryRun) {
-        await sendFollowUpSMS(lead.phone, msg, lead.id, 2);
+        await sendFollowUpSMS(lead.phone, msg, lead.id, step.num);
       } else {
-        console.log(`[DRY RUN] Follow-up 2 → ${lead.phone}: "${msg}"`);
+        console.log(`[DRY RUN] Follow-up #${step.num} (day ${step.minDays}+) → ${lead.phone}: "${msg}"`);
       }
+
+      // Only send one follow-up per run per lead to avoid flooding
+      break;
     }
   }
 }
