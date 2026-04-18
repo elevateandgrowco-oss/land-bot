@@ -17,6 +17,7 @@
 import axios from "axios";
 
 const CURRENT_YEAR = new Date().getFullYear();
+const OWNERSHIP_CUTOFF_YEAR = CURRENT_YEAR - 10;
 
 // ── County configs ─────────────────────────────────────────────────────────────
 // Fields verified against live ArcGIS layer metadata and test queries.
@@ -75,6 +76,117 @@ const COUNTY_CONFIGS = [
         yearsOwned,
         deedYear,
         assessedLandValue: attrs.LAND_VAL ? parseInt(attrs.LAND_VAL) : null,
+        phone: null,
+        nearConstruction: true,
+        scrapedAt: new Date().toISOString(),
+      };
+    },
+  },
+
+  // ── Harris County TX (Katy) ───────────────────────────────────────────────
+  // Verified: 5,089 qualifying leads
+  // Fields: owner_name_1, mail_addr_1, mail_city, mail_state, mail_zip,
+  //         site_str_num, site_str_name, site_city, site_zip,
+  //         land_value, bld_value, Acreage, state_class, new_owner_date
+  {
+    id: "harris-tx",
+    name: "Harris County TX",
+    state: "TX",
+    cities: ["Katy", "Houston", "Spring", "Humble", "Conroe"],
+    endpoint: "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
+    buildWhere: () => [
+      "bld_value = 0",
+      "land_value > 0",
+      "mail_state <> 'TX'",
+      "state_class IN ('C1','C2','D1')",
+      "new_owner_date < DATE '2016-01-01'",
+      "owner_name_1 NOT LIKE '%COUNTY%'",
+      "owner_name_1 NOT LIKE '%STATE OF%'",
+      "owner_name_1 NOT LIKE '%CITY OF%'",
+    ].join(" AND "),
+    outFields: "owner_name_1,mail_addr_1,mail_city,mail_state,mail_zip,site_str_num,site_str_name,site_city,site_zip,land_value,bld_value,Acreage,state_class,new_owner_date",
+    transform: (attrs, config) => {
+      const streetNum = attrs.site_str_num || "";
+      const streetName = attrs.site_str_name || "";
+      const siteCity = attrs.site_city || "";
+      const siteZip = attrs.site_zip || "";
+      if (!streetName) return null;
+
+      const deedYear = attrs.new_owner_date ? new Date(attrs.new_owner_date).getFullYear() : null;
+      const yearsOwned = deedYear ? CURRENT_YEAR - deedYear : null;
+      if (deedYear && deedYear > OWNERSHIP_CUTOFF_YEAR) return null;
+
+      const acreStr = String(attrs.Acreage || "").replace(/[^0-9.]/g, "");
+
+      return {
+        source: "county_records",
+        motivation: "long_time_absentee_owner",
+        city: `${siteCity || "Harris County"}, TX`,
+        state: config.state,
+        address: `${streetNum} ${streetName}, ${siteCity} TX, ${siteZip}`.trim(),
+        askingPrice: 0,
+        acreage: acreStr ? parseFloat(acreStr) : null,
+        ownerName: attrs.owner_name_1 ? String(attrs.owner_name_1).trim() : null,
+        ownerMailingAddress: [attrs.mail_addr_1, attrs.mail_city, attrs.mail_state, attrs.mail_zip].filter(Boolean).join(", "),
+        yearsOwned,
+        deedYear,
+        assessedLandValue: attrs.land_value ? parseInt(attrs.land_value) : null,
+        phone: null,
+        nearConstruction: true,
+        scrapedAt: new Date().toISOString(),
+      };
+    },
+  },
+
+  // ── Collin County TX (Frisco, McKinney, Allen, Celina) ───────────────────
+  // Verified: 16,214 qualifying leads
+  // Fields all prefixed with GIS_DBO_AD_Entity_ — must use outFields:'*'
+  {
+    id: "collin-tx",
+    name: "Collin County TX",
+    state: "TX",
+    cities: ["Frisco", "McKinney", "Celina", "Allen", "Prosper"],
+    endpoint: "https://gismaps.cityofallen.org/arcgis/rest/services/ReferenceData/Collin_County_Appraisal_District_Parcels/MapServer/1",
+    buildWhere: () => {
+      const cutoffMs = new Date("2016-01-01").getTime();
+      return [
+        "GIS_DBO_AD_Entity_curr_imprv_no = 0",
+        "GIS_DBO_AD_Entity_curr_land_non > 0",
+        `GIS_DBO_AD_Entity_addr_state <> 'TX'`,
+        `GIS_DBO_AD_Entity_deed_dt < ${cutoffMs}`,
+      ].join(" AND ");
+    },
+    outFields: "*", // joined layer requires *
+    transform: (attrs, config) => {
+      const p = "GIS_DBO_AD_Entity_"; // field prefix
+      const situsDisplay = attrs[p + "situs_display"] || "";
+      const situsCity = attrs[p + "situs_city"] || "";
+      const situsZip = attrs[p + "situs_zip"] || "";
+      if (!situsDisplay) return null;
+
+      const deedMs = attrs[p + "deed_dt"];
+      const deedYear = deedMs ? new Date(deedMs).getFullYear() : null;
+      const yearsOwned = deedYear ? CURRENT_YEAR - deedYear : null;
+      if (deedYear && deedYear > OWNERSHIP_CUTOFF_YEAR) return null;
+
+      const landSqft = attrs[p + "land_total_sq"] || 0;
+      const acreage = landSqft > 0 ? parseFloat((landSqft / 43560).toFixed(2)) : null;
+
+      const streetAddr = situsDisplay.split("\r\n")[0] || situsDisplay.split("\n")[0] || "";
+
+      return {
+        source: "county_records",
+        motivation: "long_time_absentee_owner",
+        city: `${situsCity || "Collin County"}, TX`,
+        state: config.state,
+        address: `${streetAddr}, ${situsCity} TX, ${situsZip}`.trim(),
+        askingPrice: 0,
+        acreage,
+        ownerName: attrs[p + "file_as_name"] ? String(attrs[p + "file_as_name"]).trim() : null,
+        ownerMailingAddress: [attrs[p + "addr_line2"], attrs[p + "addr_city"], attrs[p + "addr_state"], attrs[p + "addr_zip"]].filter(Boolean).join(", "),
+        yearsOwned,
+        deedYear,
+        assessedLandValue: attrs[p + "curr_land_non"] ? parseInt(attrs[p + "curr_land_non"]) : null,
         phone: null,
         nearConstruction: true,
         scrapedAt: new Date().toISOString(),
