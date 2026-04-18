@@ -47,9 +47,9 @@ async function processLead(lead, log) {
     return;
   }
 
-  // Skip if price out of range (land: $1K - $2M)
-  if (!lead.askingPrice || lead.askingPrice < 1000 || lead.askingPrice > 2000000) {
-    console.log(`   ⚠️  Price out of range ($${lead.askingPrice}) — skipping`);
+  // Skip if price is clearly junk data (negative or absurdly high)
+  if (lead.askingPrice && lead.askingPrice > 10000000) {
+    console.log(`   ⚠️  Price looks like bad data ($${lead.askingPrice}) — skipping`);
     return;
   }
 
@@ -71,10 +71,10 @@ async function processLead(lead, log) {
     console.log(`   ⚠️  Red flags: ${analysis.redFlags.join(", ")}`);
   }
 
-  // Skip bad deals
-  if (analysis.dealScore === "pass" || analysis.ourOffer <= 0) {
-    console.log(`   🚫 Deal doesn't work at this price — skipping`);
-    addLead(log, { ...lead, analysis, skipReason: "numbers dont work" });
+  // Only skip if we have no offer number at all
+  if (!analysis.ourOffer || analysis.ourOffer <= 0) {
+    console.log(`   ⚠️  Could not calculate offer — skipping`);
+    addLead(log, { ...lead, analysis, skipReason: "no offer calculated" });
     saveLog(log);
     return;
   }

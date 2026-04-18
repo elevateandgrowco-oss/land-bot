@@ -100,11 +100,9 @@ export async function analyzeLand(lead) {
   // Step 3: Qualify the deal
   const qualification = await qualifyLand(lead);
 
-  // Step 4: Deal score
+  // Step 4: Deal score — use AI qualification only, never pre-reject based on price math
+  // Seller sets the price, we make the offer — let them say no
   let dealScore = qualification.score;
-  if (assignFee < MIN_PROFIT) dealScore = "pass";
-  // For tax delinquent leads (askingPrice = 0), don't apply the "offer >= asking" check
-  if (askingPrice > 0 && ourOffer >= askingPrice) dealScore = "pass"; // We can't offer above asking and still profit
 
   return {
     address,
