@@ -140,18 +140,32 @@ export async function generateOfferMessage(lead, analysis) {
     contextHint = `This is a government auction or surplus land listing. The seller is motivated and deadline-driven — emphasize fast close.`;
   }
 
+  const firstName = lead.ownerName ? lead.ownerName.split(" ")[0] : null;
+  const greeting = firstName ? `Hey ${firstName}` : "Hey";
+  const shortAddr = lead.address.split(",")[0];
+
   const msg = await claude.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 150,
-    system: "You are a land wholesaler. Output ONLY the SMS text — no formatting, no markdown, no explanation.",
+    max_tokens: 120,
+    system: "You write text messages that sound exactly like a real person texting from their phone. No sales language. No buzzwords. Output ONLY the message text — nothing else.",
     messages: [{
       role: "user",
-      content: `Write a short casual opening SMS to a land owner to start a conversation about buying their land.
-Property: ${lead.address}
-${lead.acreage ? `Size: ${lead.acreage} acres` : ""}
-Our cash offer: $${analysis.ourOffer?.toLocaleString()}
-${contextHint}
-Rules: 1-3 sentences max. Mention cash and fast close. Do NOT dump the full offer price in the first message — just open the door. Friendly, conversational, no pressure. End with "- Jon". Output ONLY the message text.`,
+      content: `Write a first text to someone who owns a vacant lot. You want to buy it.
+
+Start with: "${greeting}"
+Street address only (don't mention city/state): ${shortAddr}
+${lead.acreage ? `Lot size: ${lead.acreage} acres` : ""}
+${isNearConstruction ? "Context: builders are active in this area right now" : ""}
+${isTaxDelinquent ? "Context: they have back taxes on it" : ""}
+
+Rules:
+- Sound like a real person, not an investor
+- 1-2 sentences MAX
+- Ask if they'd be open to selling AND what they'd want for it — get THEM to name a price first
+- Do NOT say: "cash offer", "fast close", "zero fees", "no agents", "I'm a buyer"
+- Casual and direct, like a neighbor texting
+- End with "- Jon"
+- Output the message only`,
     }],
   });
 
@@ -187,10 +201,16 @@ Max we can go (cash): $${Math.round((analysis.ourOffer || 0) * 1.15).toLocaleStr
 ${isTaxDelinquent ? `\nIMPORTANT: This seller has past-due taxes. If relevant, mention you can help them get out before county action.` : ""}
 ${ownerFinanceSellPrice ? `\nAlternative exit you can sell to a buyer later: Owner financing at $${ownerFinanceSellPrice.toLocaleString()} — $${ownerFinanceDown.toLocaleString()} down + $${ownerFinanceMonthly}/month. You don't need to mention this to the seller — it's your exit strategy.` : ""}
 
-Keep replies SHORT — 1-3 sentences, SMS tone. Goal: get them to accept or schedule a call.
-If they counter, hold firm first then offer to "see what I can do" (come up 5-10% max).
-If they say yes or want to move forward, ask for their email to send the purchase agreement.
-Ask the four qualification questions naturally if info is missing: title owner, back taxes, timeline, best price.
+Keep replies SHORT — 1-2 sentences, casual texting tone. Sound like a real person, not an investor.
+Never use: "cash offer", "fast close", "no agents", "zero fees" — just talk normally.
+
+TTP STRATEGY (Talk To People):
+- If they haven't named a price yet: ask "what would you need to get for it?"
+- If they named a price: pause, come back lower — "hmm that's a little more than I can do, what's the absolute lowest you'd take?"
+- Only reveal our number ($${analysis.ourOffer?.toLocaleString()}) after they've anchored first
+- If they counter above our max: offer owner financing — "I could do more on payments — would that work?"
+- If they say yes or want to move forward: ask for their email to send the paperwork
+- One qualification question at a time if info is missing: back taxes? anyone else on title? timeline?
 Sign as "- Jon"`,
     messages,
   });

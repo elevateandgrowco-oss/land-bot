@@ -135,19 +135,21 @@ function getFollowUpMessage(lead, followUpNum) {
   const shortAddr = lead.address.split(",")[0];
   const offer = lead.analysis?.ourOffer ? `$${lead.analysis.ourOffer.toLocaleString()}` : "a fair cash offer";
   const nearConstruction = lead.nearConstruction;
+  const firstName = lead.ownerName ? lead.ownerName.split(" ")[0] : null;
+  const hey = firstName ? `Hey ${firstName},` : "Hey,";
 
   const messages = {
     1: nearConstruction
-      ? `Hey, just wanted to make sure my message didn't get lost. I'm buying lots in your area — there's a lot of new development going up nearby and I'm looking to move fast. Still interested in a cash offer for ${shortAddr}? - Jon`
-      : `Hey, just wanted to make sure my message didn't get lost. I can do ${offer} cash for the lot at ${shortAddr}, close in 2–3 weeks, zero fees on your end. Still want to move forward? - Jon`,
+      ? `${hey} did my last text come through? Wanted to ask about ${shortAddr} — Jon`
+      : `${hey} just checking if you got my text about ${shortAddr} — Jon`,
 
     2: nearConstruction
-      ? `Following up on ${shortAddr}. The area's moving fast — builders are buying up lots nearby and I want to lock something in before prices shift. Cash, fast close, no agents. Worth a quick chat? - Jon`
-      : `Quick follow-up on ${shortAddr}. Cash offer still stands — no agents, no fees, I handle all the paperwork. If the timing isn't right yet, just let me know. - Jon`,
+      ? `${hey} still looking to buy in that area if you're open to it. No pressure either way — Jon`
+      : `${hey} still interested in ${shortAddr} if the timing ever works out — Jon`,
 
-    3: `Hey, last thing I'll say about ${shortAddr} — if price was the only issue, I might have a little room to move. Want me to take another look? Cash, 2–3 week close. - Jon`,
+    3: `${hey} last one, I promise. Would you do ${offer} for ${shortAddr}? I can close whenever works for you — Jon`,
 
-    4: `Hi, circling back one last time on ${shortAddr}. If you ever want to talk numbers, I'm still buying in your area. Just reply anytime. - Jon`,
+    4: `${hey} just circling back. Still buying in the area if you ever change your mind on ${shortAddr} — Jon`,
   };
 
   return messages[followUpNum] || messages[4];
