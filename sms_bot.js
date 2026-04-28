@@ -5,6 +5,7 @@
 
 import twilio from "twilio";
 import dotenv from "dotenv";
+import { dropVoicemail } from "./voicemail_dropper.js";
 import { handleSellerReply } from "./land_analyzer.js";
 import { loadLog, saveLog, getLead, updateLead } from "./leads_log.js";
 dotenv.config();
@@ -25,19 +26,31 @@ export async function sendOfferSMS(phone, message, leadId) {
   if (!phone) throw new Error("No phone number");
   const e164 = formatPhone(phone);
 
-  const result = await client.messages.create({ body: message, from: FROM, to: e164 });
-  console.log(`   ✉️  SMS sent to ${e164} — SID: ${result.sid}`);
+  await dropVoicemail(phone);
 
+  // Mark voicemail sent immediately so lead isn't re-processed if SMS fails
   const log = loadLog();
   updateLead(log, leadId, {
-    smsSent: true,
-    smsSentAt: new Date().toISOString(),
-    twilioSid: result.sid,
-    conversation: [{ role: "assistant", content: message, timestamp: new Date().toISOString() }],
+    voicemailSent: true,
+    voicemailSentAt: new Date().toISOString(),
   });
   saveLog(log);
 
-  return result.sid;
+  try {
+    const result = await client.messages.create({ body: message, from: FROM, to: e164 });
+    console.log(`   ✉️  SMS sent to ${e164} — SID: ${result.sid}`);
+    updateLead(log, leadId, {
+      smsSent: true,
+      smsSentAt: new Date().toISOString(),
+      twilioSid: result.sid,
+      conversation: [{ role: "assistant", content: message, timestamp: new Date().toISOString() }],
+    });
+    saveLog(log);
+    return result.sid;
+  } catch (err) {
+    console.log(`   ⏭️  SMS skipped (Twilio not ready): ${err.message}`);
+    return null;
+  }
 }
 
 // ── Send follow-up SMS ────────────────────────────────────────────────────────
