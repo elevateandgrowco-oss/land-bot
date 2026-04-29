@@ -147,15 +147,12 @@ const COUNTY_CONFIGS = [
     state: "TX",
     cities: ["Frisco", "McKinney", "Celina", "Allen", "Prosper"],
     endpoint: "https://gismaps.cityofallen.org/arcgis/rest/services/ReferenceData/Collin_County_Appraisal_District_Parcels/MapServer/1",
-    buildWhere: () => {
-      const cutoffMs = new Date("2016-01-01").getTime();
-      return [
-        "GIS_DBO_AD_Entity_curr_imprv_no = 0",
-        "GIS_DBO_AD_Entity_curr_land_non > 0",
-        `GIS_DBO_AD_Entity_addr_state <> 'TX'`,
-        `GIS_DBO_AD_Entity_deed_dt < ${cutoffMs}`,
-      ].join(" AND ");
-    },
+    buildWhere: () => [
+      "GIS_DBO_AD_Entity_curr_imprv_no = 0",
+      "GIS_DBO_AD_Entity_curr_land_non > 0",
+      "GIS_DBO_AD_Entity_addr_state <> 'TX'",
+      "GIS_DBO_AD_Entity_deed_dt < DATE '2016-01-01'",
+    ].join(" AND "),
     outFields: "*", // joined layer requires *
     transform: (attrs, config) => {
       const p = "GIS_DBO_AD_Entity_"; // field prefix
