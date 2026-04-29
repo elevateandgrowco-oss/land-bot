@@ -72,10 +72,18 @@ async function processLead(lead, log) {
     console.log(`   ⚠️  Red flags: ${analysis.redFlags.join(", ")}`);
   }
 
-  // Only skip if we have no offer number at all
+  // Skip if deal math doesn't work
   if (!analysis.ourOffer || analysis.ourOffer <= 0) {
     console.log(`   ⚠️  Could not calculate offer — skipping`);
     addLead(log, { ...lead, analysis, skipReason: "no offer calculated" });
+    saveLog(log);
+    return;
+  }
+
+  // Skip weak/rejected deals — only voicemail leads worth pursuing
+  if (analysis.dealScore === "pass") {
+    console.log(`   🚫 Deal score: pass — skipping (numbers don't work)`);
+    addLead(log, { ...lead, analysis, skipReason: "deal score pass" });
     saveLog(log);
     return;
   }
