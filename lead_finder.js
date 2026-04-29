@@ -16,6 +16,48 @@
 import * as cheerio from "cheerio";
 import axios from "axios";
 import fs from "fs";
+
+// ── Robust Zillow listing extractor ──────────────────────────────────────────
+// Zillow embeds all listing data in __NEXT_DATA__. We walk the JSON tree
+// to find arrays of objects with address.streetAddress instead of fragile regex.
+function extractZillowListings(html) {
+  const $ = cheerio.load(html);
+  const found = [];
+
+  const nextData = $("script#__NEXT_DATA__").html();
+  if (nextData) {
+    try {
+      const parsed = JSON.parse(nextData);
+      function dig(obj) {
+        if (!obj || typeof obj !== "object") return;
+        if (Array.isArray(obj)) {
+          if (obj.length > 0 && (obj[0]?.address?.streetAddress || obj[0]?.streetAddress)) {
+            found.push(...obj);
+            return;
+          }
+          obj.forEach(dig);
+          return;
+        }
+        for (const key of ["listResults", "relaxedResults", "mapResults", "results", "homes", "listings"]) {
+          if (obj[key]) { dig(obj[key]); if (found.length) return; }
+        }
+        if (!found.length) Object.values(obj).forEach(v => { if (!found.length) dig(v); });
+      }
+      dig(parsed);
+    } catch { /* ignore parse errors */ }
+  }
+
+  // Fallback: visible property cards
+  if (found.length === 0) {
+    $("[data-test='property-card'], article").each((_, el) => {
+      const address = $(el).find("address, [data-test='property-card-addr']").text().trim();
+      const price = parseInt($(el).find("[data-test='property-card-price']").text().replace(/[^0-9]/g, "")) || 0;
+      if (address && address.length > 5) found.push({ address, price });
+    });
+  }
+
+  return found;
+}
 import dotenv from "dotenv";
 import { skipTraceLeads } from "./skip_tracer.js";
 import { findCountyRecordLeads } from "./county_records.js";
@@ -205,46 +247,25 @@ async function findZillowLotsInZip(zipCode, market, maxLeads = 12) {
     await new Promise(r => setTimeout(r, 2000));
 
     const content = await page.content();
-    const $ = cheerio.load(content);
-
-    // Extract from Zillow JSON embed
-    const scriptTags = $("script[type='application/json'], script#__NEXT_DATA__").toArray();
-    for (const script of scriptTags) {
-      try {
-        const json = JSON.parse($(script).html() || "{}");
-        const searchResults = JSON.stringify(json).match(/"zpid":\d+.*?"address":\{[^}]+\}/g) || [];
-        for (const match of searchResults.slice(0, maxLeads)) {
-          try {
-            const obj = JSON.parse(`{${match}}`);
-            if (obj.address?.streetAddress) {
-              leads.push({
-                source: "zillow_lot_near_construction",
-                motivation: "near_new_construction",
-                city: market.name,
-                zip: zipCode,
-                address: `${obj.address.streetAddress}, ${obj.address.city || market.city}, ${obj.address.state || market.state}`,
-                askingPrice: obj.price || 0,
-                acreage: null,
-                phone: null,
-                nearConstruction: true,
-                scrapedAt: new Date().toISOString(),
-              });
-            }
-          } catch { /* skip */ }
-        }
-      } catch { /* not json */ }
-    }
-
-    // Fallback: visible cards
-    if (leads.length === 0) {
-      $("[data-test='property-card'], article").each((_, el) => {
-        if (leads.length >= maxLeads) return;
-        const address = $(el).find("address, [data-test='property-card-addr']").text().trim();
-        const price = parseInt($(el).find("[data-test='property-card-price']").text().replace(/[^0-9]/g, "")) || 0;
-        if (address && address.length > 5) {
-          leads.push({ source: "zillow_lot_near_construction", motivation: "near_new_construction", city: market.name, zip: zipCode, address: `${address}, ${market.city}, ${market.state}`, askingPrice: price, acreage: null, phone: null, nearConstruction: true, scrapedAt: new Date().toISOString() });
-        }
-      });
+    const listings = extractZillowListings(content);
+    for (const r of listings.slice(0, maxLeads)) {
+      const street = r.address?.streetAddress || r.address || r.streetAddress || "";
+      const city   = r.address?.city  || market.city;
+      const state  = r.address?.state || market.state;
+      if (street) {
+        leads.push({
+          source: "zillow_lot_near_construction",
+          motivation: "near_new_construction",
+          city: market.name,
+          zip: zipCode,
+          address: `${street}, ${city}, ${state}`,
+          askingPrice: r.price || r.unformattedPrice || 0,
+          acreage: null,
+          phone: null,
+          nearConstruction: true,
+          scrapedAt: new Date().toISOString(),
+        });
+      }
     }
 
     if (leads.length) console.log(`  ✓ Zillow lots zip ${zipCode} (${market.name}): ${leads.length} lots`);
@@ -277,44 +298,24 @@ async function findZillowLotsByCity(market, maxLeads = 15) {
     await new Promise(r => setTimeout(r, 2000));
 
     const content = await page.content();
-    const $ = cheerio.load(content);
-
-    const scriptTags = $("script[type='application/json'], script#__NEXT_DATA__").toArray();
-    for (const script of scriptTags) {
-      try {
-        const json = JSON.parse($(script).html() || "{}");
-        const searchResults = JSON.stringify(json).match(/"zpid":\d+.*?"address":\{[^}]+\}/g) || [];
-        for (const match of searchResults.slice(0, maxLeads)) {
-          try {
-            const obj = JSON.parse(`{${match}}`);
-            if (obj.address?.streetAddress) {
-              leads.push({
-                source: "zillow_lot_near_construction",
-                motivation: "near_new_construction",
-                city: market.name,
-                address: `${obj.address.streetAddress}, ${obj.address.city || market.city}, ${obj.address.state || market.state}`,
-                askingPrice: obj.price || 0,
-                acreage: null,
-                phone: null,
-                nearConstruction: true,
-                scrapedAt: new Date().toISOString(),
-              });
-            }
-          } catch { /* skip */ }
-        }
-      } catch { /* not json */ }
-    }
-
-    // Fallback: visible cards
-    if (leads.length === 0) {
-      $("[data-test='property-card'], article").each((_, el) => {
-        if (leads.length >= maxLeads) return;
-        const address = $(el).find("address, [data-test='property-card-addr']").text().trim();
-        const price = parseInt($(el).find("[data-test='property-card-price']").text().replace(/[^0-9]/g, "")) || 0;
-        if (address && address.length > 5) {
-          leads.push({ source: "zillow_lot_near_construction", motivation: "near_new_construction", city: market.name, address: `${address}, ${market.city}, ${market.state}`, askingPrice: price, acreage: null, phone: null, nearConstruction: true, scrapedAt: new Date().toISOString() });
-        }
-      });
+    const listings = extractZillowListings(content);
+    for (const r of listings.slice(0, maxLeads)) {
+      const street = r.address?.streetAddress || r.address || r.streetAddress || "";
+      const city   = r.address?.city  || market.city;
+      const state  = r.address?.state || market.state;
+      if (street) {
+        leads.push({
+          source: "zillow_lot_near_construction",
+          motivation: "near_new_construction",
+          city: market.name,
+          address: `${street}, ${city}, ${state}`,
+          askingPrice: r.price || r.unformattedPrice || 0,
+          acreage: null,
+          phone: null,
+          nearConstruction: true,
+          scrapedAt: new Date().toISOString(),
+        });
+      }
     }
 
     if (leads.length) console.log(`  ✓ Zillow lots ${market.name}: ${leads.length} lots`);
