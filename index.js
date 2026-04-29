@@ -16,7 +16,15 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+import http from "http";
 import cron from "node-cron";
+
+// Keep-alive HTTP server — prevents Railway from auto-sleeping the container
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end("land-bot running\n");
+}).listen(PORT, () => console.log(`✅ Health server on port ${PORT}`));
 import { findLeads } from "./lead_finder.js";
 import { analyzeLand, generateOfferMessage } from "./land_analyzer.js";
 import { sendOfferSMS, runFollowUps } from "./sms_bot.js";
