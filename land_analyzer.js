@@ -189,7 +189,7 @@ export async function handleSellerReply(lead, analysis, sellerMessage, history =
   const ownerFinanceDown = ownerFinanceSellPrice ? Math.round(ownerFinanceSellPrice * 0.15) : null;
 
   const msg = await claude.messages.create({
-    model: "claude-sonnet-4-6",
+    model: "claude-haiku-4-5-20251001",
     max_tokens: 220,
     system: `${LAND_KNOWLEDGE}
 

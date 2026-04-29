@@ -3,16 +3,16 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node index.js",
-    "dry-run": "node index.js --dry-run",
+    "start": "node server.js",
+    "dry-run": "DRY_RUN=true node server.js",
     "webhook": "node webhook.js",
-    "test": "node index.js --dry-run"
+    "test": "DRY_RUN=true node server.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/sdk": "^0.90.0",
     "axios": "^1.6.0",
     "cheerio": "^1.0.0",
-    "dotenv": "^16.0.0",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "node-cron": "^4.2.1",
     "puppeteer": "^24.0.0",
