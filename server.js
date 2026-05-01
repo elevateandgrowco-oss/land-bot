@@ -79,6 +79,17 @@ td{padding:8px 12px;border-bottom:1px solid #222}td:first-child{color:#888;width
 </body></html>`);
 });
 
+// ── Stats JSON endpoint ───────────────────────────────────────────────────────
+app.get("/stats", (req, res) => {
+  const log = modReady ? m.loadLog() : null;
+  const leads = log?.leads || [];
+  const contacted = leads.filter(l => l.smsSent).length;
+  const voicemails = leads.filter(l => l.voicemailSent).length;
+  const replied = leads.filter(l => l.conversation?.some(c => c.role === "user")).length;
+  const underContract = leads.filter(l => l.status === "under_contract").length;
+  res.json({ status: modReady ? "ready" : "loading", lastRun: lastRunAt, lastRunStatus, totalLeads: leads.length, smsSent: contacted, voicemailsSent: voicemails, replied, underContract });
+});
+
 // ── Twilio SMS webhook ────────────────────────────────────────────────────────
 app.post("/sms", async (req, res) => {
   const from = req.body.From || req.body.from;
