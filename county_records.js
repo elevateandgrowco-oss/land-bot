@@ -242,10 +242,15 @@ const COUNTY_CONFIGS = [
 
 // ── Query ArcGIS REST endpoint ────────────────────────────────────────────────
 async function queryArcGIS(endpoint, whereClause, outFields, maxRecords = 200) {
+  // Random offset so each run pulls a different page from the county's full dataset
+  // (Collin County TX = 16,214 leads, Wake County NC = 2,295 — never run dry)
+  const offset = Math.floor(Math.random() * 800);
+
   const params = new URLSearchParams({
     where: whereClause,
     outFields,
     returnGeometry: "false",
+    resultOffset: String(offset),
     resultRecordCount: String(maxRecords),
     f: "json",
   });
@@ -290,25 +295,30 @@ async function fetchCountyRecords(config, maxLeads = 50) {
 export async function findCountyRecordLeads(targetMarkets = [], maxPerCounty = 40) {
   const allLeads = [];
 
-  // Match configs by state + city overlap
-  let relevantConfigs = COUNTY_CONFIGS.filter(c =>
-    targetMarkets.some(m => {
-      if (c.state !== m.state) return false;
-      return c.cities.some(city =>
-        m.city.toLowerCase().includes(city.toLowerCase()) ||
-        city.toLowerCase().includes(m.city.split(",")[0].toLowerCase())
-      );
-    })
-  );
+  // If no markets specified, run ALL counties (used for the global sweep in findLeads)
+  let relevantConfigs;
+  if (targetMarkets.length === 0) {
+    relevantConfigs = COUNTY_CONFIGS;
+  } else {
+    // Match configs by state + city overlap
+    relevantConfigs = COUNTY_CONFIGS.filter(c =>
+      targetMarkets.some(m => {
+        if (c.state !== m.state) return false;
+        return c.cities.some(city =>
+          m.city.toLowerCase().includes(city.toLowerCase()) ||
+          city.toLowerCase().includes(m.city.split(",")[0].toLowerCase())
+        );
+      })
+    );
 
-  // Fall back to same-state configs only — never use a different state
-  if (relevantConfigs.length === 0 && targetMarkets.length > 0) {
-    const states = new Set(targetMarkets.map(m => m.state));
-    relevantConfigs = COUNTY_CONFIGS.filter(c => states.has(c.state)).slice(0, 2);
+    // Fall back to same-state configs only — never use a different state
+    if (relevantConfigs.length === 0) {
+      const states = new Set(targetMarkets.map(m => m.state));
+      relevantConfigs = COUNTY_CONFIGS.filter(c => states.has(c.state)).slice(0, 2);
+    }
+
+    if (relevantConfigs.length === 0) return allLeads;
   }
-
-  // If still nothing, just skip — don't return irrelevant county data
-  if (relevantConfigs.length === 0) return allLeads;
 
   for (const config of relevantConfigs.slice(0, 2)) {
     const leads = await fetchCountyRecords(config, maxPerCounty);

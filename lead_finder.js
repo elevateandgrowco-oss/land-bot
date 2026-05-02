@@ -526,6 +526,17 @@ export async function findLeads(maxTotal = 30) {
     }
   }
 
+  // Always pull county records from ALL configured counties (free, 16K+ leads, paginated)
+  try {
+    const countyLeads = await findCountyRecordLeads([], 60);
+    if (countyLeads.length > 0) {
+      console.log(`  🏛️  County records (all counties): ${countyLeads.length} leads`);
+      allLeads.push(...countyLeads);
+    }
+  } catch (err) {
+    console.log(`  ⚠️  County records sweep: ${err.message?.slice(0, 60)}`);
+  }
+
   console.log(`\n📊 Raw leads collected: ${allLeads.length}`);
 
   const unique = dedup(allLeads);
