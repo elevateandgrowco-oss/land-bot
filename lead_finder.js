@@ -77,7 +77,7 @@ async function initPuppeteer() {
 
 const BATCH_API_KEY = process.env.BATCH_SKIP_TRACING_API_KEY;
 
-// ── Builder-hot markets: TX, FL, NC, TN only ─────────────────────────────────
+// ── Builder-hot markets: TX, FL, NC, TN, AZ, ID, SC, AL, CO, NV, GA ──────────
 // These are the fastest-growing suburban/exurban areas where builders are active
 const MARKETS = [
   // Texas
@@ -117,6 +117,44 @@ const MARKETS = [
   { name: "La Vergne, TN",       city: "La Vergne",       state: "TN", zip: ["37086"] },
   { name: "Smyrna, TN",          city: "Smyrna",          state: "TN", zip: ["37167"] },
   { name: "Hendersonville, TN",  city: "Hendersonville",  state: "TN", zip: ["37075"] },
+
+  // Arizona
+  { name: "Buckeye, AZ",         city: "Buckeye",         state: "AZ", zip: ["85326", "85396"] },
+  { name: "Queen Creek, AZ",     city: "Queen Creek",     state: "AZ", zip: ["85142", "85144"] },
+  { name: "Maricopa, AZ",        city: "Maricopa",        state: "AZ", zip: ["85138", "85139"] },
+  { name: "Surprise, AZ",        city: "Surprise",        state: "AZ", zip: ["85374", "85379", "85387"] },
+  { name: "San Tan Valley, AZ",  city: "San Tan Valley",  state: "AZ", zip: ["85140", "85143"] },
+
+  // Idaho
+  { name: "Nampa, ID",           city: "Nampa",           state: "ID", zip: ["83651", "83687"] },
+  { name: "Meridian, ID",        city: "Meridian",        state: "ID", zip: ["83642", "83646"] },
+  { name: "Eagle, ID",           city: "Eagle",           state: "ID", zip: ["83616"] },
+  { name: "Star, ID",            city: "Star",            state: "ID", zip: ["83669"] },
+
+  // South Carolina
+  { name: "Simpsonville, SC",    city: "Simpsonville",    state: "SC", zip: ["29680", "29681"] },
+  { name: "Boiling Springs, SC", city: "Boiling Springs", state: "SC", zip: ["29316"] },
+  { name: "Mauldin, SC",         city: "Mauldin",         state: "SC", zip: ["29662"] },
+  { name: "Bluffton, SC",        city: "Bluffton",        state: "SC", zip: ["29909", "29910"] },
+
+  // Alabama
+  { name: "Huntsville, AL",      city: "Huntsville",      state: "AL", zip: ["35803", "35811", "35824"] },
+  { name: "Madison, AL",         city: "Madison",         state: "AL", zip: ["35757", "35758"] },
+  { name: "Athens, AL",          city: "Athens",          state: "AL", zip: ["35611", "35613"] },
+
+  // Colorado
+  { name: "Parker, CO",          city: "Parker",          state: "CO", zip: ["80134", "80138"] },
+  { name: "Castle Rock, CO",     city: "Castle Rock",     state: "CO", zip: ["80104", "80108"] },
+  { name: "Erie, CO",            city: "Erie",            state: "CO", zip: ["80516"] },
+
+  // Nevada
+  { name: "Henderson, NV",       city: "Henderson",       state: "NV", zip: ["89002", "89014", "89052"] },
+  { name: "North Las Vegas, NV", city: "North Las Vegas", state: "NV", zip: ["89084", "89086", "89081"] },
+
+  // Georgia
+  { name: "Cumming, GA",         city: "Cumming",         state: "GA", zip: ["30028", "30040", "30041"] },
+  { name: "Gainesville, GA",     city: "Gainesville",     state: "GA", zip: ["30501", "30506", "30507"] },
+  { name: "Acworth, GA",         city: "Acworth",         state: "GA", zip: ["30101", "30102"] },
 ];
 
 function dedup(leads) {
