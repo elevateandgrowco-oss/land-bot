@@ -9,6 +9,7 @@ import { dropVoicemail } from "./voicemail_dropper.js";
 import { handleSellerReply } from "./land_analyzer.js";
 import { loadLog, saveLog, getLead, updateLead } from "./leads_log.js";
 import { checkOutreachAllowed } from "./outreach_guard.js";
+import { checkSMSRampAllowed, recordSMSSent } from "./sms_ramp.js";
 dotenv.config();
 
 const client = twilio(
@@ -47,9 +48,16 @@ export async function sendOfferSMS(phone, message, leadId) {
     return null;
   }
 
+  const ramp = checkSMSRampAllowed();
+  if (!ramp.allowed) {
+    console.log(`   🚦 SMS ramp limit (${ramp.sent}/${ramp.limit} today) → ${e164}`);
+    return null;
+  }
+
   try {
     const result = await client.messages.create({ body: message, from: FROM, to: e164 });
     console.log(`   ✉️  SMS sent to ${e164} — SID: ${result.sid}`);
+    recordSMSSent();
     updateLead(log, leadId, {
       smsSent: true,
       smsSentAt: new Date().toISOString(),
@@ -74,8 +82,16 @@ export async function sendFollowUpSMS(phone, message, leadId, followUpNum) {
     console.log(`   🚫 Follow-up SMS blocked (${guard.reason}) → ${e164}`);
     return null;
   }
+
+  const ramp = checkSMSRampAllowed();
+  if (!ramp.allowed) {
+    console.log(`   🚦 SMS ramp limit (${ramp.sent}/${ramp.limit} today) → ${e164}`);
+    return null;
+  }
+
   const result = await client.messages.create({ body: message, from: FROM, to: e164 });
   console.log(`   ✉️  Follow-up #${followUpNum} sent to ${e164}`);
+  recordSMSSent();
 
   if (lead) {
     const conv = lead.conversation || [];
