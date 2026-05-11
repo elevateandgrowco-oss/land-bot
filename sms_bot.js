@@ -8,6 +8,7 @@ import dotenv from "dotenv";
 import { dropVoicemail } from "./voicemail_dropper.js";
 import { handleSellerReply } from "./land_analyzer.js";
 import { loadLog, saveLog, getLead, updateLead } from "./leads_log.js";
+import { checkOutreachAllowed } from "./outreach_guard.js";
 dotenv.config();
 
 const client = twilio(
@@ -25,16 +26,26 @@ function formatPhone(phone) {
 export async function sendOfferSMS(phone, message, leadId) {
   if (!phone) throw new Error("No phone number");
   const e164 = formatPhone(phone);
-
-  await dropVoicemail(phone);
-
-  // Mark voicemail sent immediately so lead isn't re-processed if SMS fails
   const log = loadLog();
-  updateLead(log, leadId, {
-    voicemailSent: true,
-    voicemailSentAt: new Date().toISOString(),
-  });
-  saveLog(log);
+  const lead = getLead(log, leadId) || { phone };
+
+  // RVM guard — DNC/quiet-hours/Slybroadcast check BEFORE dropping voicemail.
+  // Slybroadcast is independent of Twilio A2P — RVM can run while SMS is locked.
+  const rvmGuard = checkOutreachAllowed(lead, "rvm");
+  if (rvmGuard.allowed) {
+    await dropVoicemail(phone);
+    updateLead(log, leadId, { voicemailSent: true, voicemailSentAt: new Date().toISOString() });
+    saveLog(log);
+  } else {
+    console.log(`   ⏭️  RVM skipped (${rvmGuard.reason}) → ${e164}`);
+  }
+
+  // SMS guard — blocked until Twilio A2P approved
+  const smsGuard = checkOutreachAllowed(lead, "sms");
+  if (!smsGuard.allowed) {
+    console.log(`   🚫 SMS blocked (${smsGuard.reason}) → ${e164}`);
+    return null;
+  }
 
   try {
     const result = await client.messages.create({ body: message, from: FROM, to: e164 });
@@ -56,11 +67,16 @@ export async function sendOfferSMS(phone, message, leadId) {
 // ── Send follow-up SMS ────────────────────────────────────────────────────────
 export async function sendFollowUpSMS(phone, message, leadId, followUpNum) {
   const e164 = formatPhone(phone);
+  const log = loadLog();
+  const lead = getLead(log, leadId) || { phone };
+  const guard = checkOutreachAllowed(lead, "sms");
+  if (!guard.allowed) {
+    console.log(`   🚫 Follow-up SMS blocked (${guard.reason}) → ${e164}`);
+    return null;
+  }
   const result = await client.messages.create({ body: message, from: FROM, to: e164 });
   console.log(`   ✉️  Follow-up #${followUpNum} sent to ${e164}`);
 
-  const log = loadLog();
-  const lead = getLead(log, leadId);
   if (lead) {
     const conv = lead.conversation || [];
     conv.push({ role: "assistant", content: message, timestamp: new Date().toISOString() });
@@ -153,16 +169,16 @@ function getFollowUpMessage(lead, followUpNum) {
 
   const messages = {
     1: nearConstruction
-      ? `${hey} did my last text come through? Wanted to ask about ${shortAddr} — Jon`
-      : `${hey} just checking if you got my text about ${shortAddr} — Jon`,
+      ? `${hey} did my last text come through? Wanted to ask about ${shortAddr} — Jon. Reply STOP to opt out`
+      : `${hey} just checking if you got my text about ${shortAddr} — Jon. Reply STOP to opt out`,
 
     2: nearConstruction
-      ? `${hey} still looking to buy in that area if you're open to it. No pressure either way — Jon`
-      : `${hey} still interested in ${shortAddr} if the timing ever works out — Jon`,
+      ? `${hey} still looking to buy in that area if you're open to it. No pressure either way — Jon. Reply STOP to opt out`
+      : `${hey} still interested in ${shortAddr} if the timing ever works out — Jon. Reply STOP to opt out`,
 
-    3: `${hey} last one, I promise. Would you do ${offer} for ${shortAddr}? I can close whenever works for you — Jon`,
+    3: `${hey} last one, I promise. Would you do ${offer} for ${shortAddr}? I can close whenever works for you — Jon. Reply STOP to opt out`,
 
-    4: `${hey} just circling back. Still buying in the area if you ever change your mind on ${shortAddr} — Jon`,
+    4: `${hey} just circling back. Still buying in the area if you ever change your mind on ${shortAddr} — Jon. Reply STOP to opt out`,
   };
 
   return messages[followUpNum] || messages[4];
