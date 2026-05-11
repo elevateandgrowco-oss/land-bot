@@ -62,8 +62,10 @@ export async function dropVoicemail(phone) {
     const text = await res.text();
 
     if (text.startsWith("OK")) {
-      console.log(`   📞 Voicemail queued for ${phone}`);
-      return { success: true, response: text };
+      const sidMatch = text.match(/session_id=(\d+)/);
+      const sessionId = sidMatch ? sidMatch[1] : null;
+      console.log(`   📞 Voicemail queued for ${phone}${sessionId ? ` (session: ${sessionId})` : ""}`);
+      return { success: true, sessionId, response: text };
     } else {
       console.log(`   ⚠️  Slybroadcast: ${text}`);
       return { success: false, response: text };

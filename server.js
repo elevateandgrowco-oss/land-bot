@@ -10,6 +10,7 @@ import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
 import { checkOutreachAllowed } from "./outreach_guard.js";
+import { getRVMStats, checkRVMBatchAllowed, RVM_DAILY_CAP, RVM_BATCH_SIZE } from "./rvm_ramp.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -140,6 +141,7 @@ app.get("/report", (req, res) => {
   const activeLeads = leads.filter(l => !l.doNotCall && !l.dnc && !l.unsubscribed && !l.badNumber);
   const eligSMS   = activeLeads.filter(l => l.phone && !l.smsSent && !["under_contract","assigned","closed"].includes(l.status)).length;
   const eligRVM   = activeLeads.filter(l => l.phone && !l.voicemailSent).length;
+  const rvmStats  = getRVMStats();
   const eligCall  = activeLeads.filter(l => l.phone && !l.coldCalledAt).length;
   const eligEmail = activeLeads.filter(l => l.email && !l.emailSent).length;
   const eligFollowUp = activeLeads.filter(l => l.phone && l.smsSentAt && !l.followUp4SentAt && !["under_contract","assigned","closed"].includes(l.status)).length;
@@ -205,13 +207,26 @@ app.get("/report", (req, res) => {
 
     eligible: {
       sms:      { count: eligSMS,      note: smsBlocked ? "BLOCKED — pending Twilio A2P" : "ready" },
-      rvm:      { count: eligRVM,      note: slybr ? "ready" : "BLOCKED — no Slybroadcast credentials" },
+      rvm:      { count: eligRVM, remaining: Math.max(0, eligRVM - rvmStats.submitted), note: slybr ? `ready — ${rvmStats.submitted}/${rvmStats.cap} sent today` : "BLOCKED — no Slybroadcast credentials" },
       call:     { count: eligCall,     note: vapiReady ? "ready" : "BLOCKED — no VAPI_API_KEY" },
       email:    { count: eligEmail,    note: resendReady ? "ready" : "BLOCKED — no RESEND_API_KEY/FROM_EMAIL" },
       followUp: { count: eligFollowUp, note: smsBlocked ? "BLOCKED — pending Twilio A2P" : "ready" },
     },
 
     topMarkets,
+
+    rvm: {
+      audioFile:       process.env.SLYBROADCAST_AUDIO_FILE || "(not set)",
+      submitted:       rvmStats.submitted,
+      failed:          rvmStats.failed,
+      cap:             rvmStats.cap,
+      remaining:       rvmStats.remaining,
+      queuedInLeads:   eligRVM,
+      batchSize:       rvmStats.batchSize,
+      batchGapMin:     rvmStats.batchGapMin,
+      lastBatchAt:     rvmStats.lastBatchAt,
+      recentCampaigns: rvmStats.recentCampaigns,
+    },
 
     schedule: {
       nextOutreachRun: `${nextOutreach}:00 ET`,
@@ -329,6 +344,8 @@ app.get("/rvm-dry-run", (req, res) => {
   const etHour = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" })).getHours();
   const nextHours = [8, 10, 12, 14, 16, 18, 20].filter(h => h > etHour);
   const nextRun = nextHours.length ? `${nextHours[0] > 12 ? nextHours[0] - 12 : nextHours[0]}:00 ${nextHours[0] >= 12 ? "PM" : "AM"} ET` : "8:00 AM ET (tomorrow)";
+  const ramp = checkRVMBatchAllowed();
+  const stats = getRVMStats();
   res.json({
     bot: "land-bot",
     audioFile,
@@ -338,6 +355,17 @@ app.get("/rvm-dry-run", (req, res) => {
     quietBlocked,
     badPhone,
     nextRvmRun: nextRun,
+    ramp: {
+      allowed:       ramp.allowed,
+      reason:        ramp.allowed ? null : ramp.reason,
+      submitted:     stats.submitted,
+      cap:           stats.cap,
+      remaining:     stats.remaining,
+      batchSize:     stats.batchSize,
+      batchGapMin:   stats.batchGapMin,
+      lastBatchAt:   stats.lastBatchAt,
+      nextAllowedIn: ramp.nextAllowedIn ?? null,
+    },
     smsBlocked: true,
     smsReason: "pending Twilio A2P",
   });

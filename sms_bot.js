@@ -10,6 +10,7 @@ import { handleSellerReply } from "./land_analyzer.js";
 import { loadLog, saveLog, getLead, updateLead } from "./leads_log.js";
 import { checkOutreachAllowed } from "./outreach_guard.js";
 import { checkSMSRampAllowed, recordSMSSent } from "./sms_ramp.js";
+import { checkRVMBatchAllowed, getRVMBatchLimit, recordRVMSent } from "./rvm_ramp.js";
 dotenv.config();
 
 const client = twilio(
@@ -246,13 +247,34 @@ export async function runFollowUps(dryRun = false) {
   }
 }
 
-// ── RVM batch — drop voicemails to existing leads that missed RVM ─────────────
+// ── RVM batch — drop voicemails with daily cap, batch size, and gap enforcement ─
 export async function runRVMBatch(dryRun = false) {
   const log = loadLog();
   let sent = 0, skipped = 0;
+  const today = new Date().toDateString();
+
+  // Check daily cap + minimum batch gap before touching any lead
+  const rampCheck = checkRVMBatchAllowed();
+  if (!rampCheck.allowed) {
+    console.log(`   🚦 RVM ramp: ${rampCheck.reason}`);
+    return 0;
+  }
+
+  const batchLimit = getRVMBatchLimit();
+  console.log(`   📞 RVM batch starting — up to ${batchLimit} leads (${rampCheck.submitted}/${rampCheck.cap} sent today)`);
 
   for (const lead of log.leads) {
+    if (sent >= batchLimit) break; // hard batch cap
+
     if (lead.voicemailSent || lead.unsubscribed || lead.doNotCall || lead.badNumber || !lead.phone) continue;
+
+    // No RVM + Vapi-call on the same day
+    const calledToday = lead.coldCalledAt && new Date(lead.coldCalledAt).toDateString() === today;
+    if (calledToday) {
+      console.log(`   ⏭️  RVM skipped — Vapi-called today → ${lead.phone}`);
+      skipped++;
+      continue;
+    }
 
     const guard = checkOutreachAllowed(lead, "rvm");
     if (!guard.allowed) {
@@ -267,7 +289,13 @@ export async function runRVMBatch(dryRun = false) {
 
     const result = await dropVoicemail(lead.phone);
     if (result?.success !== false) {
-      updateLead(log, lead.id, { voicemailSent: true, voicemailSentAt: new Date().toISOString() });
+      const sessionId = result?.sessionId || null;
+      recordRVMSent(sessionId, lead.phone);
+      updateLead(log, lead.id, {
+        voicemailSent: true,
+        voicemailSentAt: new Date().toISOString(),
+        rvmSessionId: sessionId,
+      });
       saveLog(log);
       sent++;
     }
@@ -277,7 +305,7 @@ export async function runRVMBatch(dryRun = false) {
   }
 
   if (sent > 0 || skipped > 0) {
-    console.log(`   📞 RVM batch: ${sent} sent, ${skipped} skipped (quiet hrs / no provider)`);
+    console.log(`   📞 RVM batch: ${sent} sent, ${skipped} skipped`);
   }
   return sent;
 }
