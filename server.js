@@ -9,6 +9,7 @@ import cron from "node-cron";
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
+import { checkOutreachAllowed } from "./outreach_guard.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -300,6 +301,45 @@ app.post("/cold-call-update", (req, res) => {
     _stat("callsExported");
   }
   res.json({ ok: true });
+});
+
+// ── RVM dry-run — per-lead guard breakdown without sending anything ───────────
+app.get("/rvm-dry-run", (req, res) => {
+  if (!modReady) return res.json({ error: "modules not ready" });
+  const log = m.loadLog();
+  const audioFile = process.env.SLYBROADCAST_AUDIO_FILE || "(not set)";
+  let eligible = 0, dncBlocked = 0, quietBlocked = 0, alreadySent = 0, badPhone = 0;
+  for (const lead of (log.leads || [])) {
+    if (!lead.phone) { badPhone++; continue; }
+    if (lead.voicemailSent) { alreadySent++; continue; }
+    if (lead.unsubscribed || lead.doNotCall || lead.badNumber) { dncBlocked++; continue; }
+    const guard = checkOutreachAllowed(lead, "rvm");
+    if (!guard.allowed) {
+      if (guard.reason?.includes("quiet") || guard.reason?.includes("hours") || guard.reason?.includes("timezone")) {
+        quietBlocked++;
+      } else {
+        dncBlocked++;
+      }
+      continue;
+    }
+    eligible++;
+  }
+  const now = new Date();
+  const etHour = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" })).getHours();
+  const nextHours = [8, 10, 12, 14, 16, 18, 20].filter(h => h > etHour);
+  const nextRun = nextHours.length ? `${nextHours[0] > 12 ? nextHours[0] - 12 : nextHours[0]}:00 ${nextHours[0] >= 12 ? "PM" : "AM"} ET` : "8:00 AM ET (tomorrow)";
+  res.json({
+    bot: "land-bot",
+    audioFile,
+    eligible,
+    alreadySent,
+    dncBlocked,
+    quietBlocked,
+    badPhone,
+    nextRvmRun: nextRun,
+    smsBlocked: true,
+    smsReason: "pending Twilio A2P",
+  });
 });
 
 // ── Start HTTP server FIRST ───────────────────────────────────────────────────
