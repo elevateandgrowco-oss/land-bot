@@ -315,7 +315,8 @@ app.get("/rvm-dry-run", (req, res) => {
     if (lead.unsubscribed || lead.doNotCall || lead.badNumber) { dncBlocked++; continue; }
     const guard = checkOutreachAllowed(lead, "rvm");
     if (!guard.allowed) {
-      if (guard.reason?.includes("quiet") || guard.reason?.includes("hours") || guard.reason?.includes("timezone")) {
+      const r = (guard.reason || "").toUpperCase();
+      if (r.includes("QUIET") || r.includes("HOURS") || r.includes("TIMEZONE")) {
         quietBlocked++;
       } else {
         dncBlocked++;
